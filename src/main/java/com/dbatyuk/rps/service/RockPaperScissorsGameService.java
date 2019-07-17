@@ -3,47 +3,61 @@ package com.dbatyuk.rps.service;
 import com.dbatyuk.rps.model.RockPaperScissors;
 import com.dbatyuk.rps.model.RockPaperScissorsGame;
 import com.dbatyuk.rps.model.RockPaperScissorsRound;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.core.IMap;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import static com.dbatyuk.rps.model.RockPaperScissors.*;
 
 @Service
 public class RockPaperScissorsGameService {
 
-    private final Map<UUID, RockPaperScissorsGame> games = new HashMap<>();
     private static final Map<RockPaperScissors, RockPaperScissors> POWER = Map.of(
             rock, paper,
             paper, scissors,
             scissors, rock
     );
 
+    private final IMap<UUID, RockPaperScissorsGame> games;
+
+    public RockPaperScissorsGameService(HazelcastInstance hazelcastInstance) {
+        this.games = hazelcastInstance.getMap("games");
+    }
+
     public RockPaperScissorsGame start() {
         RockPaperScissorsGame game = new RockPaperScissorsGame();
-        games.put(game.getId(), game);
+        games.set(game.getId(), game);
         return game;
     }
 
-    public RockPaperScissorsRound play(UUID gameId, RockPaperScissors userMove) {
-        RockPaperScissorsGame game = getGame(gameId);
+    public RockPaperScissorsRound playLocked(UUID gameId, RockPaperScissors userMove) {
+        try {
+            games.tryLock(gameId, 5, TimeUnit.SECONDS);
+            RockPaperScissorsGame game = getGame(gameId);
 
-        RockPaperScissors computerMove = makeComputerMove(game);
-        boolean draw = isDraw(userMove, computerMove);
-        boolean computerWinner = isComputerWinner(userMove, computerMove);
-        RockPaperScissorsRound round = new RockPaperScissorsRound(userMove, computerMove, computerWinner, draw);
+            RockPaperScissors computerMove = makeComputerMove(game);
+            boolean computerWinner = isComputerWinner(userMove, computerMove);
+            RockPaperScissorsRound round = new RockPaperScissorsRound(userMove, computerMove, computerWinner);
 
-        game.addRound(round);
-        games.put(gameId, game);
+            game.addRound(round);
+            games.put(gameId, game);
 
-        return round;
+            return round;
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            games.unlock(gameId);
+        }
     }
 
     public RockPaperScissorsGame end(UUID gameId) {
         RockPaperScissorsGame game = getGame(gameId);
 
         // TODO store statistics
-        games.remove(gameId);
+        games.delete(gameId);
 
         return game;
     }
@@ -74,10 +88,6 @@ public class RockPaperScissorsGameService {
         }
 
         return Optional.of(game.getRounds().get(game.getRounds().size() - 1));
-    }
-
-    private boolean isDraw(RockPaperScissors userMove, RockPaperScissors computerMove){
-        return userMove.equals(computerMove);
     }
 
     private boolean isComputerWinner(RockPaperScissors userMove, RockPaperScissors computerMove) {

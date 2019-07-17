@@ -1,6 +1,10 @@
 package com.dbatyuk.rps.model;
 
-public class RockPaperScissorsRound {
+import java.io.Serializable;
+
+public class RockPaperScissorsRound implements Serializable {
+
+    private static final long serialVersionUID = 3543235341962866176L;
 
     private final RockPaperScissors userMove;
     private final RockPaperScissors computerMove;
